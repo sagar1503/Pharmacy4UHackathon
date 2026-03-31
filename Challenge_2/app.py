@@ -1,8 +1,8 @@
 import streamlit as st
 import json
 import requests
-import pandas as pd
 import os
+import zipfile
 
 # --- PAGE CONFIG ---
 st.set_page_config(page_title="Pharmacy2U: Pathway-Aware Recommendations", layout="wide")
@@ -17,56 +17,56 @@ factoring in context like underlying chronic illnesses (e.g. Diabetes).
 # --- HELPER FUNCTIONS ---
 @st.cache_data(show_spinner=False)
 def load_model():
-    if not os.path.exists("markov_transitions.json"):
-        return None
-    with open("markov_transitions.json", "r") as f:
+    # Handle both zipped (GitHub) and unzipped (local) versions
+    json_path = "markov_transitions.json"
+    zip_path = "markov_transitions.zip"
+    
+    if not os.path.exists(json_path):
+        if os.path.exists(zip_path):
+            with st.spinner("Extracting model... (first load only)"):
+                with zipfile.ZipFile(zip_path, 'r') as zf:
+                    zf.extractall(".")
+        else:
+            return None
+    
+    with open(json_path, "r") as f:
         return json.load(f)
 
 @st.cache_data(show_spinner=False)
 def get_drug_info(ndc11):
-    """
-    Queries the RxNav API to convert an 11-digit NDC code to a human readable drug name.
-    """
+    """Queries the RxNav API to convert an 11-digit NDC code to a human readable drug name."""
     try:
-        # Step 1: Get RxCUI from NDC
         resp = requests.get(f"https://rxnav.nlm.nih.gov/REST/rxcui.json?idtype=NDC&id={ndc11}", timeout=2)
         if resp.status_code == 200:
             data = resp.json()
             if 'idGroup' in data and 'rxnormId' in data['idGroup']:
                 rxcui = data['idGroup']['rxnormId'][0]
-                
-                # Step 2: Get Drug Name/Properties from RxCUI
                 prop_resp = requests.get(f"https://rxnav.nlm.nih.gov/REST/rxcui/{rxcui}/properties.json", timeout=2)
                 if prop_resp.status_code == 200:
-                    prop_data = prop_resp.json()
-                    name = prop_data['properties']['name']
-                    return name
+                    return prop_resp.json()['properties']['name']
     except Exception:
         pass
-    
     return f"Unknown Formulation (NDC: {ndc11})"
 
 # --- MAIN APP ---
 model = load_model()
 
 if model is None:
-    st.error("Model file `markov_transitions.json` not found. Please run scripts `02b` and `03b` first.")
+    st.error("Model file `markov_transitions.json` (or `.zip`) not found. Please run scripts `02b` and `03b` first.")
     st.stop()
 
 st.sidebar.header("Patient Context Simulator")
 st.sidebar.markdown("Choose a scenario to see how the recommendation engine adapts to the patient's existing conditions.")
 
-# Select a current drug to start the scenario. 
-# We'll hardcode a few interesting NDCs from the CMS dataset for demo purposes, 
-# or let the user type one.
 demo_drugs = {
+    "49999047100 (Lovastatin - Cholesterol)": "49999047100",
+    "00093075305 (Atenolol - Beta Blocker)": "00093075305",
+    "66105010209 (Quinapril - ACE Inhibitor)": "66105010209",
     "00002325030 (Humalog Insulin)": "00002325030",
-    "00004002950 (Lexapro - Depression)": "00004002950",
-    "00006002728 (Januvia - Diabetes)": "00006002728",
-    "00049005050 (Rocephin - Antibiotic)": "00049005050"
+    "Custom NDC...": None
 }
 
-selection = st.sidebar.selectbox("Patient's Most Recent Prescription:", list(demo_drugs.keys()) + ["Custom NDC..."])
+selection = st.sidebar.selectbox("Patient's Most Recent Prescription:", list(demo_drugs.keys()))
 
 if selection == "Custom NDC...":
     current_drug = st.sidebar.text_input("Enter 11-Digit NDC Code:")
@@ -80,7 +80,6 @@ pathway = 'diabetes' if has_diabetes else 'global'
 st.divider()
 
 if current_drug and len(current_drug) >= 9:
-    # 1. Fetch current drug name
     with st.spinner("Resolving actual drug name via FDA RxNav API..."):
         current_name = get_drug_info(current_drug)
     
@@ -93,7 +92,6 @@ if current_drug and len(current_drug) >= 9:
         
     st.markdown("### 🎯 Recommended 'Next-Best' Consultations / Prescriptions:")
     
-    # Get predictions
     transitions = model[pathway].get(current_drug, [])
     
     if not transitions and has_diabetes:
@@ -106,7 +104,6 @@ if current_drug and len(current_drug) >= 9:
     if not transitions:
         st.error("No historical transition data exists for this drug in the Markov Graph.")
     else:
-        # Display top 5
         top_k = 5
         cols = st.columns(top_k)
         
@@ -125,7 +122,7 @@ if current_drug and len(current_drug) >= 9:
                     <p style='font-size: 11px; color: #777;'><i>Based on {pathway_used} historical cadence</i></p>
                 </div>
                 """, unsafe_allow_html=True)
-                
+            
     st.divider()
     st.markdown("""
     **💡 Explanation of Recommendation Engine:**
@@ -133,4 +130,3 @@ if current_drug and len(current_drug) >= 9:
     synthetic prescription sequences (DE-SynPUF). The interface dynamically queries the FDA RxNav REST API 
     to map raw National Drug Codes (NDCs) into human-readable clinical formulations in real-time.
     """)
-    
