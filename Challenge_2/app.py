@@ -27,7 +27,7 @@ def load_model():
         if os.path.exists(zip_path):
             with st.spinner("Extracting model... (first load only)"):
                 with zipfile.ZipFile(zip_path, 'r') as zf:
-                    zf.extractall(".")
+                    zf.extractall(SCRIPT_DIR)
         else:
             return None
     
