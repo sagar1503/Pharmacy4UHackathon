@@ -1,0 +1,24 @@
+# ---- Data files (too large for GitHub) ----
+*.csv
+*.zip
+data/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+.venv/
+env/
+venv/
+
+# ---- Jupyter Notebooks ----
+.ipynb_checkpoints/
+
+# ---- OS files ----
+.DS_Store
+Thumbs.db
+
+# ---- IDE ----
+.vscode/
+.idea/
